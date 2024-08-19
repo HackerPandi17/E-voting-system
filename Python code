@@ -1,0 +1,290 @@
+import tkinter as tk
+from tkinter import messagebox, filedialog
+from PIL import Image, ImageTk
+import pymysql.cursors
+
+#MySQL connection configuration
+db_config = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': '*********',
+    'database': 'election',
+    'cursorclass': pymysql.cursors.DictCursor  # Return rows as dictionaries
+}
+
+# Establishing MySQL connection
+try:
+    connection = pymysql.connect(**db_config)
+    print("Connected to MySQL!")
+except pymysql.MySQLError as e:
+    print(f"Error connecting to MySQL: {e}")
+    exit(1)
+
+# In-memory data storage
+voter_history = set()
+
+# Function to handle admin login
+def admin_login():
+    login_window = tk.Toplevel(root)
+    login_window.title("Admin Login")
+    
+    tk.Label(login_window, text="Admin Login").grid(row=0, columnspan=2)
+    
+    tk.Label(login_window, text="Username").grid(row=1, column=0, sticky='e')
+    admin_username = tk.Entry(login_window)
+    admin_username.grid(row=1, column=1)
+    
+    tk.Label(login_window, text="Password").grid(row=2, column=0, sticky='e')
+    admin_password = tk.Entry(login_window, show="*")
+    admin_password.grid(row=2, column=1)
+    
+    def check_admin():
+        if admin_username.get() == "admin" and admin_password.get() == "password":  # Simple authentication
+            login_window.destroy()
+            open_admin_panel()
+        else:
+            messagebox.showerror("Error", "Invalid Credentials")
+    
+    tk.Button(login_window, text="Login", command=check_admin).grid(row=3, columnspan=2)
+
+# Function to handle user login
+def user_login():
+    user_window = tk.Toplevel(root)
+    user_window.title("User Login")
+    
+    tk.Label(user_window, text="User Login").grid(row=0, columnspan=2)
+    
+    tk.Label(user_window, text="Voter ID").grid(row=1, column=0, sticky='e')
+    voter_id_entry = tk.Entry(user_window)
+    voter_id_entry.grid(row=1, column=1)
+    
+    tk.Label(user_window, text="Ward Number").grid(row=2, column=0, sticky='e')
+    ward_number_entry = tk.Entry(user_window)
+    ward_number_entry.grid(row=2, column=1)
+    
+    def check_user():
+        voter_id = voter_id_entry.get()
+        ward_number = ward_number_entry.get()
+        
+        try:
+            with connection.cursor() as cursor:
+                query = "SELECT * FROM voters WHERE voter_id = %s AND ward_number = %s"
+                cursor.execute(query, (voter_id, ward_number))
+                result = cursor.fetchone()
+                
+                if result:
+                    if voter_id not in voter_history:
+                        user_window.destroy()
+                        open_user_panel(voter_id, ward_number)
+                    else:
+                        messagebox.showerror("Error", "You have already voted")
+                else:
+                    messagebox.showerror("Error", "Voter ID not found or ward number does not match")
+        except pymysql.MySQLError as e:
+            print(f"Error executing MySQL query: {e}")
+            messagebox.showerror("Error", "Database error occurred")
+    
+    tk.Button(user_window, text="Login", command=check_user).grid(row=3, columnspan=2)
+
+# Admin panel for adding candidates and voters
+def open_admin_panel():
+    admin_window = tk.Toplevel(root)
+    admin_window.title("Admin Panel")
+    
+    # Add candidate
+    tk.Label(admin_window, text="Add Candidate").grid(row=0, columnspan=2)
+    
+    tk.Label(admin_window, text="Candidate Name").grid(row=1, column=0, sticky='e')
+    candidate_name_entry = tk.Entry(admin_window)
+    candidate_name_entry.grid(row=1, column=1)
+    
+    tk.Label(admin_window, text="Candidate Ward").grid(row=2, column=0, sticky='e')
+    candidate_ward_entry = tk.Entry(admin_window)
+    candidate_ward_entry.grid(row=2, column=1)
+    
+    tk.Label(admin_window, text="Candidate Symbol (JPEG)").grid(row=3, column=0, sticky='e')
+    candidate_symbol_label = tk.Label(admin_window)
+    candidate_symbol_label.grid(row=3, column=1)
+    
+    def select_symbol():
+        file_path = filedialog.askopenfilename(filetypes=[("JPEG files", "*.jpg;*.jpeg")])
+        if file_path:
+            img = Image.open(file_path)
+            img.thumbnail((100, 100))
+            img = ImageTk.PhotoImage(img)
+            candidate_symbol_label.config(image=img)
+            candidate_symbol_label.image = img
+            candidate_symbol_label.file_path = file_path
+    
+    tk.Button(admin_window, text="Select Symbol", command=select_symbol).grid(row=4, columnspan=2)
+    
+    def add_candidate():
+        candidate_name = candidate_name_entry.get()
+        candidate_ward = candidate_ward_entry.get()
+        candidate_symbol = getattr(candidate_symbol_label, 'file_path', None)
+        
+        if candidate_symbol:
+            try:
+                with connection.cursor() as cursor:
+                    query = "INSERT INTO candidates (candidate_name, ward_number, symbol_path) VALUES (%s, %s, %s)"
+                    cursor.execute(query, (candidate_name, candidate_ward, candidate_symbol))
+                    connection.commit()
+                    
+                    messagebox.showinfo("Success", "Candidate added")
+                    candidate_name_entry.delete(0, tk.END)
+                    candidate_ward_entry.delete(0, tk.END)
+                    candidate_symbol_label.config(image="")
+            except pymysql.MySQLError as e:
+                print(f"Error executing MySQL query: {e}")
+                messagebox.showerror("Error", "Database error occurred")
+        else:
+            messagebox.showerror("Error", "Please select a symbol")
+    
+    tk.Button(admin_window, text="Add Candidate", command=add_candidate).grid(row=5, columnspan=2)
+    
+    # Add voter
+    tk.Label(admin_window, text="Add Voter").grid(row=6, columnspan=2)
+    
+    tk.Label(admin_window, text="Voter Name").grid(row=7, column=0, sticky='e')
+    voter_name_entry = tk.Entry(admin_window)
+    voter_name_entry.grid(row=7, column=1)
+    
+    tk.Label(admin_window, text="Voter ID").grid(row=8, column=0, sticky='e')
+    voter_id_entry = tk.Entry(admin_window)
+    voter_id_entry.grid(row=8, column=1)
+    
+    tk.Label(admin_window, text="Ward Number").grid(row=9, column=0, sticky='e')
+    voter_ward_entry = tk.Entry(admin_window)
+    voter_ward_entry.grid(row=9, column=1)
+    
+    def add_voter():
+        voter_name = voter_name_entry.get()
+        voter_id = voter_id_entry.get()
+        ward_number = voter_ward_entry.get()
+        
+        try:
+            with connection.cursor() as cursor:
+                query = "INSERT INTO voters (voter_id, voter_name, ward_number) VALUES (%s, %s, %s)"
+                cursor.execute(query, (voter_id, voter_name, ward_number))
+                connection.commit()
+                
+                messagebox.showinfo("Success", f"Voter added with ID: {voter_id} and Ward Number: {ward_number}")
+                voter_name_entry.delete(0, tk.END)
+                voter_id_entry.delete(0, tk.END)
+                voter_ward_entry.delete(0, tk.END)
+        except pymysql.MySQLError as e:
+            print(f"Error executing MySQL query: {e}")
+            messagebox.showerror("Error", "Database error occurred")
+    
+    tk.Button(admin_window, text="Add Voter", command=add_voter).grid(row=10, columnspan=2)
+    
+    # Show results button
+    tk.Button(admin_window, text="Show Results", command=show_results).grid(row=11, columnspan=2)
+    
+    # Exit button
+    tk.Button(admin_window, text="Exit", command=admin_window.destroy).grid(row=12, columnspan=2)
+
+# User panel for voting
+def open_user_panel(voter_id, ward_number):
+    user_window = tk.Toplevel(root)
+    user_window.title("Voting Panel")
+    
+    tk.Label(user_window, text=f"Welcome, {voter_id}").pack()
+    
+    # Display candidates
+    tk.Label(user_window, text="Select a Candidate").pack()
+    
+    candidate_frames = []
+    selected_candidate = tk.StringVar(user_window)
+    selected_candidate.set(None)  # Ensure no candidate is pre-selected
+    
+    def cast_vote():
+        candidate_name = selected_candidate.get()
+        if candidate_name:
+            try:
+                with connection.cursor() as cursor:
+                    query = "UPDATE candidates SET vote_count = vote_count + 1 WHERE candidate_name = %s"
+                    cursor.execute(query, (candidate_name,))
+                    connection.commit()
+                    
+                    voter_history.add(voter_id)
+                    
+                    messagebox.showinfo("Success", "Vote casted successfully")
+                    user_window.destroy()
+                    user_login()
+            except pymysql.MySQLError as e:
+                print(f"Error executing MySQL query: {e}")
+                messagebox.showerror("Error", "Database error occurred")
+        else:
+            messagebox.showerror("Error", "Please select a candidate")
+    
+    try:
+        with connection.cursor() as cursor:
+            query = "SELECT * FROM candidates WHERE ward_number = %s"
+            cursor.execute(query, (ward_number,))
+            candidates_from_db = cursor.fetchall()
+            
+            for candidate in candidates_from_db:
+                candidate_frame = tk.Frame(user_window)
+                candidate_frame.pack(fill='x', padx=10, pady=5)
+                
+                candidate_name = candidate['candidate_name']
+                candidate_symbol_path = candidate['symbol_path']
+                img = Image.open(candidate_symbol_path)
+                img.thumbnail((50, 50))
+                img = ImageTk.PhotoImage(img)
+                
+                candidate_image_label = tk.Label(candidate_frame, image=img)
+                candidate_image_label.image = img  # Keep a reference to avoid garbage collection
+                candidate_image_label.pack(side="left")
+                
+                candidate_name_label = tk.Label(candidate_frame, text=candidate_name)
+                candidate_name_label.pack(side="left", padx=10)
+                
+                candidate_radio = tk.Radiobutton(candidate_frame, variable=selected_candidate, value=candidate_name, command=lambda: disable_others(candidate_frames))
+                candidate_radio.pack(side="right")
+                
+                candidate_frames.append(candidate_frame)
+    except pymysql.MySQLError as e:
+        print(f"Error executing MySQL query: {e}")
+        messagebox.showerror("Error", "Database error occurred")
+    
+    def disable_others(frames):
+        for frame in frames:
+            for widget in frame.winfo_children():
+                if isinstance(widget, tk.Radiobutton) and widget.cget('value') != selected_candidate.get():
+                    widget.config(state='disabled')
+    
+    tk.Button(user_window, text="Vote", command=cast_vote).pack()
+    
+    # Exit button
+    tk.Button(user_window, text="Exit", command=user_window.destroy).pack()
+
+# Function to show results
+def show_results():
+    results_window = tk.Toplevel(root)
+    results_window.title("Results")
+    
+    results_text = ""
+    try:
+        with connection.cursor() as cursor:
+            query = "SELECT * FROM candidates"
+            cursor.execute(query)
+            candidates_from_db = cursor.fetchall()
+            
+            for candidate in candidates_from_db:
+                results_text += f"{candidate['candidate_name']}: {candidate['vote_count']} votes\n"
+    except pymysql.MySQLError as e:
+        print(f"Error executing MySQL query: {e}")
+        messagebox.showerror("Error", "Database error occurred")
+    
+    tk.Label(results_window, text=results_text).pack()
+
+# Main window setup
+root = tk.Tk()
+root.title("E-Voting System")
+
+tk.Button(root, text="Admin Login", command=admin_login).pack()
+tk.Button(root, text="User Login", command=user_login).pack()
+
+root.mainloop()
